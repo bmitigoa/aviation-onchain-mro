@@ -1,66 +1,160 @@
-## Foundry
+# Aviation On-Chain MRO (Maintenance & Parts Traceability)
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+A smart contract–based system for **tamper-proof aircraft maintenance records and serialized part traceability**, built with **Solidity and Foundry**.
 
-Foundry consists of:
+This project demonstrates how blockchain can be used to improve **auditability, safety, and trust** in aviation Maintenance, Repair, and Overhaul (MRO) operations.
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+---
 
-## Documentation
+## ✈️ Problem Context
 
-https://book.getfoundry.sh/
+In aviation:
 
-## Usage
+* Aircraft parts must be traceable by **serial number**
+* Maintenance records must be **accurate, immutable, and auditable**
+* Counterfeit or undocumented parts pose serious **safety and regulatory risks**
+* Audits are often manual, slow, and fragmented across systems
+
+Traditional databases allow records to be modified. This project explores how **on-chain immutability** can address these challenges.
+
+---
+
+## ⛓️ Solution Overview
+
+The system provides an **on-chain ledger** for:
+
+* Aircraft registration
+* Serialized part lifecycle management
+* Maintenance event logging by authorized personnel
+
+All critical actions are enforced through **role-based access control** and recorded as **immutable blockchain events**.
+
+---
+
+## 🔑 Core Features
+
+* **Role-Based Access Control**
+
+  * Admin
+  * MRO (Maintenance Organization)
+  * Licensed Engineer
+  * Auditor (read-only)
+
+* **Aircraft Registry**
+
+  * Register aircraft (e.g. `5Y-ABC`)
+  * Store model and operator details
+
+* **Parts Registry**
+
+  * Register serialized aircraft parts
+  * Track lifecycle: Registered → Installed → Removed / Scrapped
+  * Enforce aircraft–part relationships
+
+* **Maintenance Log**
+
+  * Log maintenance actions against aircraft and parts
+  * Attach document hashes (e.g. IPFS CID or PDF hash)
+  * Immutable event trail for audits
+
+* **Fully Tested**
+
+  * Unit tests cover authorization, lifecycle rules, and failure cases
+
+---
+
+## 🧱 Architecture
+
+**Smart Contracts**
+
+* `RoleManager.sol` – Manages system roles and permissions
+* `AircraftRegistry.sol` – Aircraft registration and lookup
+* `PartRegistry.sol` – Serialized part lifecycle management
+* `MaintenanceLog.sol` – Maintenance event logging
+
+**Design Principles**
+
+* Events-first (easy off-chain indexing)
+* Minimal on-chain storage
+* Clear separation of responsibilities
+
+---
+
+## 🛠️ Tech Stack
+
+* **Solidity** (≥ 0.8.x)
+* **Foundry** (forge, anvil)
+* **EVM-compatible networks** (local Anvil, testnets, or permissioned chains)
+
+---
+
+## 📁 Project Structure
+
+```
+aviation-onchain-mro/
+├── src/        # Smart contracts
+├── test/       # Foundry unit tests
+├── script/     # Demo / deployment scripts
+├── foundry.toml
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+* Foundry installed (`forge --version`)
+* Git
 
 ### Build
 
-```shell
-$ forge build
+```bash
+forge build
 ```
 
-### Test
+### Run Tests
 
-```shell
-$ forge test
+```bash
+forge test -v
 ```
 
-### Format
+All tests should pass.
 
-```shell
-$ forge fmt
-```
+---
 
-### Gas Snapshots
+## 🧪 Demo Scenario
 
-```shell
-$ forge snapshot
-```
+The demo script shows a realistic workflow:
 
-### Anvil
+1. Admin assigns MRO and Engineer roles
+2. Aircraft is registered
+3. A serialized engine part is registered and installed
+4. A maintenance event is logged with a document hash
 
-```shell
-$ anvil
-```
+This mirrors real-world MRO operations.
 
-### Deploy
+---
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+## 🔮 Future Enhancements
 
-### Cast
+* IPFS integration for signed maintenance documents
+* QR / NFC tagging for physical part verification
+* Frontend dashboard for regulators and auditors
+* Deployment on permissioned EVM networks for enterprise use
+* Integration with ESG and compliance reporting systems
 
-```shell
-$ cast <subcommand>
-```
+---
 
-### Help
+## 👨‍💻 Purpose
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+This project was built as:
+
+* A **portfolio project** for blockchain / smart contract engineering
+* A foundation for further research into blockchain applications in aviation
+
+---
+
+## 📄 License
+
+MIT

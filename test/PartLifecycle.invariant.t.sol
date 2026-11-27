@@ -13,6 +13,7 @@ contract PartHandler is Test {
     uint256 public constant AIRCRAFT = 3;
     bytes32[] public partIds;
     mapping(bytes32 => bool) public everScrapped;
+    bool public installedWhileExpired;
 
     constructor(PartRegistry p, bytes32[] memory ids) {
         parts = p;
@@ -24,7 +25,17 @@ contract PartHandler is Test {
     }
 
     function install(uint256 pSeed, uint256 aSeed) external {
-        try parts.installPart((aSeed % AIRCRAFT) + 1, _pid(pSeed)) {} catch {}
+        bytes32 id = _pid(pSeed);
+        bool expired = parts.isLifeExpired(id);
+        try parts.installPart((aSeed % AIRCRAFT) + 1, id) {
+            if (expired) installedWhileExpired = true;
+        } catch {}
+    }
+
+    function fly(uint256 pSeed, uint32 flightHours, uint32 flightCycles) external {
+        bytes32[] memory ids = new bytes32[](1);
+        ids[0] = _pid(pSeed);
+        try parts.recordUsage(ids, flightHours % 50, flightCycles % 20) {} catch {}
     }
 
     function remove(uint256 pSeed, uint256 aSeed) external {
@@ -47,6 +58,23 @@ contract PartLifecycleInvariantTest is Test {
     PartRegistry parts;
     PartHandler handler;
 
+    function _part(string memory pn, string memory sn, string memory mfr)
+        internal
+        pure
+        returns (PartRegistry.PartInput memory)
+    {
+        return PartRegistry.PartInput({
+            partNumber: pn,
+            serialNumber: sn,
+            manufacturer: mfr,
+            releaseCertHash: keccak256(abi.encode("Form 1", sn)), // stand-in certificate hash
+            hourLimit: 0,
+            cycleLimit: 0,
+            hoursSinceNew: 0,
+            cyclesSinceNew: 0
+        });
+    }
+
     function setUp() public {
         RoleManager roles = new RoleManager(address(this));
         AircraftRegistry aircraft = new AircraftRegistry(roles);
@@ -57,10 +85,14 @@ contract PartLifecycleInvariantTest is Test {
         aircraft.registerAircraft("5Y-CCC", "E190", "Op");
 
         bytes32[] memory ids = new bytes32[](4);
-        ids[0] = parts.registerPart("PN-1", "SN-1", "OEM");
-        ids[1] = parts.registerPart("PN-1", "SN-2", "OEM");
-        ids[2] = parts.registerPart("PN-2", "SN-1", "OEM");
-        ids[3] = parts.registerPart("PN-3", "SN-9", "OEM-B");
+        ids[0] = parts.registerPart(_part("PN-1", "SN-1", "OEM"));
+        ids[1] = parts.registerPart(_part("PN-1", "SN-2", "OEM"));
+        ids[2] = parts.registerPart(_part("PN-2", "SN-1", "OEM"));
+        // A life-limited disk: 500 hours / 200 cycles, so random flying expires it quickly.
+        PartRegistry.PartInput memory llp = _part("PN-3", "SN-9", "OEM-B");
+        llp.hourLimit = 500;
+        llp.cycleLimit = 200;
+        ids[3] = parts.registerPart(llp);
 
         handler = new PartHandler(parts, ids);
         roles.grantRole(roles.MRO_ROLE(), address(handler));
@@ -77,6 +109,11 @@ contract PartLifecycleInvariantTest is Test {
                 assertEq(p.installedAircraftId, 0);
             }
         }
+    }
+
+    /// A part at or past its life limit is never installed.
+    function invariant_ExpiredPartNeverInstalled() public view {
+        assertFalse(handler.installedWhileExpired());
     }
 
     /// installedAircraftId is set if and only if the part is INSTALLED.

@@ -16,6 +16,8 @@ contract RoleManager {
     bytes32 public constant MRO_ROLE = keccak256("MRO_ROLE");
     bytes32 public constant ENGINEER_ROLE = keccak256("ENGINEER_ROLE");
     bytes32 public constant AUDITOR_ROLE = keccak256("AUDITOR_ROLE");
+    /// @notice Independent inspector for Required Inspection Items (RII).
+    bytes32 public constant INSPECTOR_ROLE = keccak256("INSPECTOR_ROLE");
 
     mapping(bytes32 => mapping(address => bool)) private _hasRole;
 
@@ -63,6 +65,7 @@ contract RoleManager {
     }
 
     function _isValidRole(bytes32 role) private pure returns (bool) {
-        return role == ADMIN_ROLE || role == MRO_ROLE || role == ENGINEER_ROLE || role == AUDITOR_ROLE;
+        return role == ADMIN_ROLE || role == MRO_ROLE || role == ENGINEER_ROLE || role == AUDITOR_ROLE
+            || role == INSPECTOR_ROLE;
     }
 }

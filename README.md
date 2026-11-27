@@ -39,6 +39,7 @@ All critical actions are enforced through **role-based access control** and reco
   * MRO (Maintenance Organization) – registers aircraft and parts, installs/removes/scraps parts
   * Licensed Engineer – logs and amends maintenance records
   * Auditor – flags records for review (flags are permanent and public)
+  * Inspector – independently signs off Required Inspection Items (RII)
 
 * **Aircraft Registry**
 
@@ -50,12 +51,15 @@ All critical actions are enforced through **role-based access control** and reco
   * Parts are identified by `partId = keccak256(abi.encode(manufacturer, partNumber, serialNumber))`, since serial numbers are only unique per manufacturer and part number
   * Enforced lifecycle (see rules below)
   * Enforce aircraft–part relationships
+  * **Release certificates:** every part carries the SHA-256 of its EASA Form 1 / FAA 8130-3; a new one is recorded after each shop visit
+  * **Life-limited parts (LLP):** hour and cycle limits, usage recorded per flight or per day, and installation blocked once a limit is reached
 
 * **Maintenance Log (append-only)**
 
   * Log maintenance against a part **installed on that aircraft**, or off-wing shop work (`aircraftId = 0`) on a removed / newly registered part
   * Each entry stores the **SHA-256 of its supporting document** plus an optional storage URI (e.g. `ipfs://…`)
   * Engineers can **sign records off-chain (EIP-712)** and a relayer submits them
+  * **Required Inspection Items:** a record marked `requiresInspection` is not released until an independent inspector signs it off; the engineer who did the work can never inspect it
   * Corrections are **amendments**: new entries that reference the original, which stays unchanged
   * Immutable event trail for audits
 
@@ -66,8 +70,8 @@ All critical actions are enforced through **role-based access control** and reco
 
 * **Tested**
 
-  * 59 unit and fuzz tests covering authorization, lifecycle rules, signatures, Merkle proofs, events and failure cases
-  * Invariant tests that drive random install / remove / scrap sequences
+  * 81 unit and fuzz tests covering authorization, lifecycle rules, airworthiness controls, signatures, Merkle proofs, events and failure cases
+  * 3 invariant tests that drive random install / remove / scrap / flying sequences
 
 ---
 
@@ -87,6 +91,20 @@ REGISTERED ──scrap──▶ SCRAPPED
 | A part is on at most one aircraft at a time | `AlreadyInstalled` |
 | Maintenance on an aircraft must reference a part installed on it | `PartNotOnAircraft` |
 | Shop work cannot target an installed or scrapped part | `PartNotAvailableForShopWork` |
+| Every part needs a release certificate to be registered | `EmptyCertificate` |
+| A new release certificate can only be recorded while the part is off-wing | `CertificateWhileInstalled` |
+| A part at or past its hour or cycle limit cannot be installed | `LifeLimitReached` |
+| Usage can only be recorded on installed parts | `NotInstalled` |
+
+---
+
+## ✅ Airworthiness Controls
+
+**Release certificates.** `registerPart` requires the SHA-256 of the part's authorised release certificate (EASA Form 1 / FAA 8130-3). `verifyReleaseCertificate(partId, hash)` checks a certificate file against the record. After a shop visit, `recordReleaseCertificate` stores the new certificate; earlier ones stay in the `ReleaseCertificateRecorded` event history.
+
+**Life-limited parts.** Parts can carry an hour limit and/or a cycle limit (0 = none), plus hours and cycles since new for used parts. The MRO records usage for one or many installed parts in one call (`recordUsage(partIds, flightHours, flightCycles)`). Usage is always recorded as flown, even past a limit, so the record stays truthful; `LifeLimitExceeded` is emitted when a limit is reached, and the part can no longer be installed. `remainingLife(partId)` returns hours and cycles left.
+
+**Required Inspection Items (dual sign-off).** A maintenance record created with `requiresInspection = true` is not released (`isReleased(logId) == false`) until a holder of `INSPECTOR_ROLE` calls `signInspection(logId)`. The inspector must be a different person from the engineer, even if the engineer also holds the inspector role. Amending an RII record creates an entry that needs its own new inspection.
 
 ---
 
@@ -106,7 +124,7 @@ REGISTERED ──scrap──▶ SCRAPPED
 EIP-712 type signed by engineers:
 
 ```
-MaintenanceRecord(uint256 aircraftId,bytes32 partId,string action,bytes32 docHash,string docUri,uint256 nonce,uint256 deadline)
+MaintenanceRecord(uint256 aircraftId,bytes32 partId,string action,bytes32 docHash,string docUri,bool requiresInspection,uint256 nonce,uint256 deadline)
 Domain: name "AviationMRO MaintenanceLog", version "1", chainId, verifyingContract
 ```
 
@@ -151,7 +169,7 @@ ENGINEER_KEY=0x.. RELAYER_KEY=0x.. RPC_URL=http://127.0.0.1:8545 MAINTENANCE_LOG
 
 * `RoleManager.sol` – Manages system roles and permissions
 * `AircraftRegistry.sol` – Aircraft registration and lookup
-* `PartRegistry.sol` – Serialized part lifecycle management
+* `PartRegistry.sol` – Serialized part lifecycle, release certificates, life-limited parts
 * `MaintenanceLog.sol` – Append-only maintenance records, EIP-712 sign-off, document verification
 * `BatchAnchor.sol` – Merkle-root anchoring of maintenance packages
 
@@ -186,6 +204,7 @@ aviation-onchain-mro/
 ├── test/
 │   ├── AviationMRO.t.sol              # unit + fuzz tests
 │   ├── Cryptography.t.sol             # EIP-712, ERC-1271, document + Merkle tests
+│   ├── Airworthiness.t.sol            # release certificates, LLP, RII tests
 │   └── PartLifecycle.invariant.t.sol  # invariant tests
 ├── tools/                             # hash-doc, build-batch, sign-record (Node.js)
 │   └── examples/                      # sample C-check package + generated tree
@@ -240,11 +259,13 @@ forge script script/Deploy.s.sol:DemoScript --rpc-url http://127.0.0.1:8545 --br
 
 1. Admin deploys the contracts and assigns MRO, Engineer and Auditor roles
 2. MRO registers aircraft `5Y-ABC`
-3. MRO registers and installs a serialized engine
-4. Engineer **signs a maintenance record off-chain (EIP-712)**; the MRO relays it, so the engineer pays no gas
+3. MRO registers an engine and a life-limited HPT disk (20,000 cycles), each with its Form 1 hash, and installs both
+4. Engineer **signs a Required Inspection Item off-chain (EIP-712)**; the MRO relays it, so the engineer pays no gas
 5. MRO anchors a 5-task C-check package as a single Merkle root
 6. Engineer corrects the record with an amendment (original unchanged)
-7. Auditor flags the original entry for review, and the work card's SHA-256 is verified on-chain
+7. An independent inspector signs off the RII, releasing the work
+8. MRO records a day of flying (6 h, 4 cycles) on the installed parts
+9. Auditor flags the original entry for review; the work card's SHA-256, the release status and the disk's remaining cycles are checked on-chain
 
 This mirrors real-world MRO operations.
 
@@ -253,9 +274,8 @@ This mirrors real-world MRO operations.
 ## 🔮 Future Enhancements
 
 * IPFS pinning service integration for maintenance documents
-* Release-certificate hashes (EASA Form 1 / FAA 8130-3) at part registration
-* Life-limited part tracking (flight hours and cycles)
-* Dual sign-off for Required Inspection Items
+* Calendar-limited parts and shelf-life tracking
+* Inspector sign-off by EIP-712 signature (same relayer flow as engineers)
 * QR / NFC tagging for physical part verification
 * Frontend dashboard for regulators and auditors
 * Deployment on permissioned EVM networks for enterprise use

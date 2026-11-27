@@ -241,6 +241,20 @@ contract AviationMROTest is Test {
 
     // ---------------------------------------------------------------- MaintenanceLog
 
+    // SHA-256 literals: a sha256() call is a precompile call and would consume vm.prank.
+    bytes32 constant DOC = 0x1a7d233e33e1a97979566f1b77904f31f14169ae84308ed3825bbbf45267a100; // sha256("work card v1")
+    bytes32 constant DOC2 = 0x66e231dbd1cce4eadc4f55f7bd146279ee7d07bb0c15301c7a4988c4b83dee58; // sha256("work card v2")
+
+    function _rec(uint256 aircraftId, bytes32 partId, string memory action)
+        internal
+        pure
+        returns (MaintenanceLog.Record memory)
+    {
+        return MaintenanceLog.Record({
+            aircraftId: aircraftId, partId: partId, action: action, docHash: DOC, docUri: "ipfs://QmWorkCard"
+        });
+    }
+
     function _install() internal {
         vm.prank(mro);
         parts.installPart(aId, engine);
@@ -249,13 +263,15 @@ contract AviationMROTest is Test {
     function testLogMaintenance_EngineerCanLogOnInstalledPart() public {
         _install();
         vm.prank(engineer);
-        uint256 logId = mlog.logMaintenance(aId, engine, "Engine borescope inspection", "QmFakeCid123");
+        uint256 logId = mlog.logMaintenance(_rec(aId, engine, "Engine borescope inspection"));
 
         assertEq(logId, 0);
         assertEq(mlog.count(), 1);
         MaintenanceLog.MaintenanceEvent memory e = mlog.get(logId);
         assertEq(e.engineer, engineer);
+        assertEq(e.submitter, engineer);
         assertEq(e.partId, engine);
+        assertEq(e.docHash, DOC);
         assertFalse(e.isAmendment);
     }
 
@@ -266,13 +282,13 @@ contract AviationMROTest is Test {
 
         vm.prank(engineer);
         vm.expectRevert(MaintenanceLog.PartNotOnAircraft.selector);
-        mlog.logMaintenance(a2, engine, "Inspection", "hash");
+        mlog.logMaintenance(_rec(a2, engine, "Inspection"));
     }
 
     function testLogMaintenance_RevertsIfPartNotInstalledAnywhere() public {
         vm.prank(engineer);
         vm.expectRevert(MaintenanceLog.PartNotOnAircraft.selector);
-        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+        mlog.logMaintenance(_rec(aId, engine, "Inspection"));
     }
 
     function testLogMaintenance_ShopWorkOnRemovedPart() public {
@@ -281,7 +297,7 @@ contract AviationMROTest is Test {
         parts.removePart(aId, engine);
 
         vm.prank(engineer);
-        uint256 logId = mlog.logMaintenance(0, engine, "Shop overhaul", "QmShopReport");
+        uint256 logId = mlog.logMaintenance(_rec(0, engine, "Shop overhaul"));
         assertEq(mlog.get(logId).aircraftId, 0);
     }
 
@@ -289,7 +305,7 @@ contract AviationMROTest is Test {
         _install();
         vm.prank(engineer);
         vm.expectRevert(MaintenanceLog.PartNotAvailableForShopWork.selector);
-        mlog.logMaintenance(0, engine, "Shop overhaul", "hash");
+        mlog.logMaintenance(_rec(0, engine, "Shop overhaul"));
     }
 
     function testLogMaintenance_ShopWorkRevertsIfScrapped() public {
@@ -297,43 +313,47 @@ contract AviationMROTest is Test {
         parts.scrapPart(engine);
         vm.prank(engineer);
         vm.expectRevert(MaintenanceLog.PartNotAvailableForShopWork.selector);
-        mlog.logMaintenance(0, engine, "Shop overhaul", "hash");
+        mlog.logMaintenance(_rec(0, engine, "Shop overhaul"));
     }
 
     function testLogMaintenance_RevertsIfOutsider() public {
         _install();
         vm.prank(outsider);
         vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
-        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+        mlog.logMaintenance(_rec(aId, engine, "Inspection"));
     }
 
     function testLogMaintenance_RevertsIfAuditor() public {
         _install();
         vm.prank(auditor);
         vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
-        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+        mlog.logMaintenance(_rec(aId, engine, "Inspection"));
     }
 
     function testLogMaintenance_RevertsOnEmptyDocHash() public {
         _install();
         vm.prank(engineer);
-        vm.expectRevert(MaintenanceLog.EmptyString.selector);
-        mlog.logMaintenance(aId, engine, "Inspection", "");
+        MaintenanceLog.Record memory r = _rec(aId, engine, "Inspection");
+        r.docHash = bytes32(0);
+        vm.expectRevert(MaintenanceLog.EmptyDocHash.selector);
+        mlog.logMaintenance(r);
     }
 
     function testLogMaintenance_EmitsEvent() public {
         _install();
         vm.expectEmit(true, true, true, true, address(mlog));
-        emit MaintenanceLog.MaintenanceLogged(0, aId, engine, "Inspection", "hash", engineer);
+        emit MaintenanceLog.MaintenanceLogged(
+            0, aId, engine, "Inspection", DOC, "ipfs://QmWorkCard", engineer, engineer
+        );
         vm.prank(engineer);
-        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+        mlog.logMaintenance(_rec(aId, engine, "Inspection"));
     }
 
     function testAmendMaintenance_KeepsOriginalAndLinks() public {
         _install();
         vm.startPrank(engineer);
-        uint256 original = mlog.logMaintenance(aId, engine, "Torque check 50 Nm", "QmV1");
-        uint256 fix = mlog.amendMaintenance(original, "Torque check 55 Nm (corrected)", "QmV2");
+        uint256 original = mlog.logMaintenance(_rec(aId, engine, "Torque check 50 Nm"));
+        uint256 fix = mlog.amendMaintenance(original, "Torque check 55 Nm (corrected)", DOC2, "ipfs://QmV2");
         vm.stopPrank();
 
         assertEq(mlog.count(), 2);
@@ -349,13 +369,13 @@ contract AviationMROTest is Test {
     function testAmendMaintenance_RevertsForUnknownLog() public {
         vm.prank(engineer);
         vm.expectRevert(MaintenanceLog.LogNotFound.selector);
-        mlog.amendMaintenance(42, "x", "y");
+        mlog.amendMaintenance(42, "x", DOC, "");
     }
 
     function testFlagRecord_AuditorOnly() public {
         _install();
         vm.prank(engineer);
-        uint256 logId = mlog.logMaintenance(aId, engine, "Inspection", "hash");
+        uint256 logId = mlog.logMaintenance(_rec(aId, engine, "Inspection"));
 
         vm.prank(engineer);
         vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
@@ -389,7 +409,7 @@ contract AviationMROTest is Test {
         vm.expectRevert(PartRegistry.NotAuthorized.selector);
         parts.registerPart("PN", "SN", "OEM");
         vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
-        mlog.logMaintenance(aId, engine, "x", "y");
+        mlog.logMaintenance(_rec(aId, engine, "x"));
         vm.stopPrank();
     }
 

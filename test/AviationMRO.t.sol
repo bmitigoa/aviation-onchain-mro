@@ -16,31 +16,99 @@ contract AviationMROTest is Test {
     address admin = address(0xA11CE);
     address mro = address(0xB0B);
     address engineer = address(0xE11);
+    address auditor = address(0xA0D);
     address outsider = address(0xBAD);
 
+    uint256 aId;
+    bytes32 engine;
+
     function setUp() public {
-    // Deploy RoleManager AS admin (msg.sender = admin)
-    vm.startPrank(admin);
-    roles = new RoleManager(admin);
+        vm.startPrank(admin);
+        roles = new RoleManager(admin);
+        roles.grantRole(roles.MRO_ROLE(), mro);
+        roles.grantRole(roles.ENGINEER_ROLE(), engineer);
+        roles.grantRole(roles.AUDITOR_ROLE(), auditor);
+        vm.stopPrank();
 
-    // Now these work because msg.sender is admin
-    roles.grantRole(roles.MRO_ROLE(), mro);
-    roles.grantRole(roles.ENGINEER_ROLE(), engineer);
-    vm.stopPrank();
+        aircraft = new AircraftRegistry(roles);
+        parts = new PartRegistry(roles, aircraft);
+        mlog = new MaintenanceLog(roles, aircraft, parts);
 
-    aircraft = new AircraftRegistry(roles);
-    parts = new PartRegistry(roles, aircraft);
-    mlog = new MaintenanceLog(roles, aircraft, parts);
+        vm.startPrank(mro);
+        aId = aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
+        engine = parts.registerPart("CFM56-7B", "SN-ENG-0001", "CFM International");
+        vm.stopPrank();
     }
 
-    function testRegisterAircraft_AdminOrMRO() public {
-        vm.prank(mro);
-        uint256 id = aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
-        assertEq(id, 1);
+    // ---------------------------------------------------------------- RoleManager
 
+    function testGrantRole_RevertsIfAlreadyGranted() public {
+        bytes32 mroRole = roles.MRO_ROLE();
+        vm.prank(admin);
+        vm.expectRevert(RoleManager.AlreadyGranted.selector);
+        roles.grantRole(mroRole, mro);
+    }
+
+    function testGrantRole_RevertsForInvalidRole() public {
+        vm.prank(admin);
+        vm.expectRevert(RoleManager.InvalidRole.selector);
+        roles.grantRole(keccak256("PILOT_ROLE"), outsider);
+    }
+
+    function testGrantRole_RevertsForNonAdmin() public {
+        bytes32 mroRole = roles.MRO_ROLE();
+        vm.prank(mro);
+        vm.expectRevert(RoleManager.NotAdmin.selector);
+        roles.grantRole(mroRole, outsider);
+    }
+
+    function testRevokeRole_RemovesAccess() public {
+        bytes32 mroRole = roles.MRO_ROLE();
+        vm.prank(admin);
+        roles.revokeRole(mroRole, mro);
+        assertFalse(roles.hasRole(mroRole, mro));
+
+        vm.prank(mro);
+        vm.expectRevert(AircraftRegistry.NotAuthorized.selector);
+        aircraft.registerAircraft("5Y-XYZ", "A320", "Jambojet");
+    }
+
+    function testRevokeRole_CannotRemoveLastAdmin() public {
+        bytes32 adminRole = roles.ADMIN_ROLE();
+        vm.prank(admin);
+        vm.expectRevert(RoleManager.LastAdmin.selector);
+        roles.revokeRole(adminRole, admin);
+    }
+
+    function testRevokeRole_AdminCanStepDownWhenAnotherAdminExists() public {
+        bytes32 adminRole = roles.ADMIN_ROLE();
+        address admin2 = address(0xA22);
+        vm.startPrank(admin);
+        roles.grantRole(adminRole, admin2);
+        assertEq(roles.adminCount(), 2);
+        roles.revokeRole(adminRole, admin);
+        vm.stopPrank();
+
+        assertEq(roles.adminCount(), 1);
+        assertFalse(roles.hasRole(adminRole, admin));
+        assertTrue(roles.hasRole(adminRole, admin2));
+    }
+
+    function testRoleGranted_EmitsEvent() public {
+        bytes32 engRole = roles.ENGINEER_ROLE();
+        vm.expectEmit(true, true, true, true, address(roles));
+        emit RoleManager.RoleGranted(engRole, outsider, admin);
+        vm.prank(admin);
+        roles.grantRole(engRole, outsider);
+    }
+
+    // ---------------------------------------------------------------- AircraftRegistry
+
+    function testRegisterAircraft_AdminOrMRO() public {
         vm.prank(admin);
         uint256 id2 = aircraft.registerAircraft("5Y-DEF", "A320", "Jambojet");
         assertEq(id2, 2);
+        assertTrue(aircraft.exists(id2));
     }
 
     function testRegisterAircraft_RevertsForOutsider() public {
@@ -49,65 +117,287 @@ contract AviationMROTest is Test {
         aircraft.registerAircraft("5Y-ZZZ", "B787", "Some Airline");
     }
 
-    function testPartLifecycle_RegisterInstallRemove() public {
+    function testRegisterAircraft_RevertsOnDuplicate() public {
         vm.prank(mro);
-        uint256 aId = aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
+        vm.expectRevert(AircraftRegistry.AircraftExists.selector);
+        aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
+    }
 
+    function testRegisterAircraft_RevertsOnEmptyField() public {
         vm.prank(mro);
-        parts.registerPart("GE-CFM56", "SN-ENG-0001", "GE Aviation");
+        vm.expectRevert(AircraftRegistry.EmptyString.selector);
+        aircraft.registerAircraft("", "B737-800", "Kenya Airways");
+    }
 
+    // ---------------------------------------------------------------- PartRegistry
+
+    function testRegisterPart_SameSerialDifferentManufacturerIsAllowed() public {
         vm.prank(mro);
-        parts.installPart(aId, "SN-ENG-0001");
+        bytes32 other = parts.registerPart("CFM56-7B", "SN-ENG-0001", "Another OEM");
+        assertTrue(other != engine);
+        assertTrue(parts.partExists(other));
+    }
 
-        PartRegistry.Part memory p = parts.getPart("SN-ENG-0001");
-        assertEq(uint256(p.status), uint256(PartRegistry.PartStatus.INSTALLED));
-        assertEq(p.installedAircraftId, aId);
-
+    function testRegisterPart_RevertsOnDuplicate() public {
         vm.prank(mro);
-        parts.removePart(aId, "SN-ENG-0001");
+        vm.expectRevert(PartRegistry.PartExists.selector);
+        parts.registerPart("CFM56-7B", "SN-ENG-0001", "CFM International");
+    }
 
-        p = parts.getPart("SN-ENG-0001");
+    function testRegisterPart_RevertsForEngineer() public {
+        vm.prank(engineer);
+        vm.expectRevert(PartRegistry.NotAuthorized.selector);
+        parts.registerPart("PN-1", "SN-1", "OEM");
+    }
+
+    function testPartKey_MatchesReturnedId() public view {
+        assertEq(parts.partKey("CFM International", "CFM56-7B", "SN-ENG-0001"), engine);
+    }
+
+    function testPartLifecycle_RegisterInstallRemoveReinstall() public {
+        vm.startPrank(mro);
+        parts.installPart(aId, engine);
+        assertTrue(parts.isInstalledOn(engine, aId));
+
+        parts.removePart(aId, engine);
+        PartRegistry.Part memory p = parts.getPart(engine);
         assertEq(uint256(p.status), uint256(PartRegistry.PartStatus.REMOVED));
         assertEq(p.installedAircraftId, 0);
+
+        // A removed (serviceable) part may be reinstalled.
+        parts.installPart(aId, engine);
+        vm.stopPrank();
+        assertTrue(parts.isInstalledOn(engine, aId));
     }
 
     function testInstallPart_RevertsIfAircraftMissing() public {
         vm.prank(mro);
-        parts.registerPart("GE-CFM56", "SN-ENG-0001", "GE Aviation");
-
-        vm.prank(mro);
         vm.expectRevert(PartRegistry.AircraftNotFound.selector);
-        parts.installPart(999, "SN-ENG-0001");
+        parts.installPart(999, engine);
     }
 
-    function testLogMaintenance_EngineerCanLog() public {
-        vm.prank(mro);
-        uint256 aId = aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
+    function testInstallPart_RevertsIfAlreadyInstalled() public {
+        vm.startPrank(mro);
+        uint256 a2 = aircraft.registerAircraft("5Y-DEF", "A320", "Jambojet");
+        parts.installPart(aId, engine);
+        vm.expectRevert(PartRegistry.AlreadyInstalled.selector);
+        parts.installPart(a2, engine);
+        vm.stopPrank();
+    }
 
-        vm.prank(mro);
-        parts.registerPart("GE-CFM56", "SN-ENG-0001", "GE Aviation");
+    function testInstallPart_RevertsIfScrapped() public {
+        vm.startPrank(mro);
+        parts.scrapPart(engine);
+        vm.expectRevert(PartRegistry.PartIsScrapped.selector);
+        parts.installPart(aId, engine);
+        vm.stopPrank();
+    }
 
+    function testRemovePart_RevertsIfWrongAircraft() public {
+        vm.startPrank(mro);
+        uint256 a2 = aircraft.registerAircraft("5Y-DEF", "A320", "Jambojet");
+        parts.installPart(aId, engine);
+        vm.expectRevert(PartRegistry.NotInstalledOnThatAircraft.selector);
+        parts.removePart(a2, engine);
+        vm.stopPrank();
+    }
+
+    function testScrapPart_RevertsIfInstalled() public {
+        vm.startPrank(mro);
+        parts.installPart(aId, engine);
+        vm.expectRevert(PartRegistry.MustRemoveBeforeScrap.selector);
+        parts.scrapPart(engine);
+        vm.stopPrank();
+    }
+
+    function testScrapPart_AfterRemovalEmitsBothEvents() public {
+        vm.startPrank(mro);
+        parts.installPart(aId, engine);
+
+        vm.expectEmit(true, true, true, true, address(parts));
+        emit PartRegistry.PartRemoved(engine, aId, mro);
+        parts.removePart(aId, engine);
+
+        vm.expectEmit(true, true, true, true, address(parts));
+        emit PartRegistry.PartScrapped(engine, mro);
+        parts.scrapPart(engine);
+        vm.stopPrank();
+
+        assertEq(uint256(parts.statusOf(engine)), uint256(PartRegistry.PartStatus.SCRAPPED));
+    }
+
+    function testScrapPart_RevertsIfAlreadyScrapped() public {
+        vm.startPrank(mro);
+        parts.scrapPart(engine);
+        vm.expectRevert(PartRegistry.PartIsScrapped.selector);
+        parts.scrapPart(engine);
+        vm.stopPrank();
+    }
+
+    function testStatusOf_RevertsForUnknownPart() public {
+        vm.expectRevert(PartRegistry.PartNotFound.selector);
+        parts.statusOf(bytes32(uint256(123)));
+    }
+
+    // ---------------------------------------------------------------- MaintenanceLog
+
+    function _install() internal {
+        vm.prank(mro);
+        parts.installPart(aId, engine);
+    }
+
+    function testLogMaintenance_EngineerCanLogOnInstalledPart() public {
+        _install();
         vm.prank(engineer);
-        uint256 logId = mlog.logMaintenance(
-            aId,
-            "SN-ENG-0001",
-            "Engine inspection (A-check)",
-            "QmFakeIpfsCidOrPdfHash123"
-        );
+        uint256 logId = mlog.logMaintenance(aId, engine, "Engine borescope inspection", "QmFakeCid123");
 
         assertEq(logId, 0);
         assertEq(mlog.count(), 1);
+        MaintenanceLog.MaintenanceEvent memory e = mlog.get(logId);
+        assertEq(e.engineer, engineer);
+        assertEq(e.partId, engine);
+        assertFalse(e.isAmendment);
+    }
+
+    function testLogMaintenance_RevertsIfPartNotOnThatAircraft() public {
+        vm.prank(mro);
+        uint256 a2 = aircraft.registerAircraft("5Y-DEF", "A320", "Jambojet");
+        _install(); // installed on aId, not a2
+
+        vm.prank(engineer);
+        vm.expectRevert(MaintenanceLog.PartNotOnAircraft.selector);
+        mlog.logMaintenance(a2, engine, "Inspection", "hash");
+    }
+
+    function testLogMaintenance_RevertsIfPartNotInstalledAnywhere() public {
+        vm.prank(engineer);
+        vm.expectRevert(MaintenanceLog.PartNotOnAircraft.selector);
+        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+    }
+
+    function testLogMaintenance_ShopWorkOnRemovedPart() public {
+        _install();
+        vm.prank(mro);
+        parts.removePart(aId, engine);
+
+        vm.prank(engineer);
+        uint256 logId = mlog.logMaintenance(0, engine, "Shop overhaul", "QmShopReport");
+        assertEq(mlog.get(logId).aircraftId, 0);
+    }
+
+    function testLogMaintenance_ShopWorkRevertsIfInstalled() public {
+        _install();
+        vm.prank(engineer);
+        vm.expectRevert(MaintenanceLog.PartNotAvailableForShopWork.selector);
+        mlog.logMaintenance(0, engine, "Shop overhaul", "hash");
+    }
+
+    function testLogMaintenance_ShopWorkRevertsIfScrapped() public {
+        vm.prank(mro);
+        parts.scrapPart(engine);
+        vm.prank(engineer);
+        vm.expectRevert(MaintenanceLog.PartNotAvailableForShopWork.selector);
+        mlog.logMaintenance(0, engine, "Shop overhaul", "hash");
     }
 
     function testLogMaintenance_RevertsIfOutsider() public {
-        vm.prank(mro);
-        uint256 aId = aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
-
-        vm.prank(mro);
-        parts.registerPart("GE-CFM56", "SN-ENG-0001", "GE Aviation");
-
+        _install();
         vm.prank(outsider);
         vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
-        mlog.logMaintenance(aId, "SN-ENG-0001", "Inspection", "hash");
+        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+    }
+
+    function testLogMaintenance_RevertsIfAuditor() public {
+        _install();
+        vm.prank(auditor);
+        vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
+        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+    }
+
+    function testLogMaintenance_RevertsOnEmptyDocHash() public {
+        _install();
+        vm.prank(engineer);
+        vm.expectRevert(MaintenanceLog.EmptyString.selector);
+        mlog.logMaintenance(aId, engine, "Inspection", "");
+    }
+
+    function testLogMaintenance_EmitsEvent() public {
+        _install();
+        vm.expectEmit(true, true, true, true, address(mlog));
+        emit MaintenanceLog.MaintenanceLogged(0, aId, engine, "Inspection", "hash", engineer);
+        vm.prank(engineer);
+        mlog.logMaintenance(aId, engine, "Inspection", "hash");
+    }
+
+    function testAmendMaintenance_KeepsOriginalAndLinks() public {
+        _install();
+        vm.startPrank(engineer);
+        uint256 original = mlog.logMaintenance(aId, engine, "Torque check 50 Nm", "QmV1");
+        uint256 fix = mlog.amendMaintenance(original, "Torque check 55 Nm (corrected)", "QmV2");
+        vm.stopPrank();
+
+        assertEq(mlog.count(), 2);
+        assertEq(mlog.get(original).action, "Torque check 50 Nm"); // unchanged
+        MaintenanceLog.MaintenanceEvent memory a = mlog.get(fix);
+        assertTrue(a.isAmendment);
+        assertEq(a.amendsLogId, original);
+        assertEq(a.partId, engine);
+        assertEq(mlog.amendmentsOf(original).length, 1);
+        assertEq(mlog.amendmentsOf(original)[0], fix);
+    }
+
+    function testAmendMaintenance_RevertsForUnknownLog() public {
+        vm.prank(engineer);
+        vm.expectRevert(MaintenanceLog.LogNotFound.selector);
+        mlog.amendMaintenance(42, "x", "y");
+    }
+
+    function testFlagRecord_AuditorOnly() public {
+        _install();
+        vm.prank(engineer);
+        uint256 logId = mlog.logMaintenance(aId, engine, "Inspection", "hash");
+
+        vm.prank(engineer);
+        vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
+        mlog.flagRecord(logId, "self-flag");
+
+        vm.expectEmit(true, true, false, true, address(mlog));
+        emit MaintenanceLog.RecordFlagged(logId, auditor, "Doc hash does not match work card");
+        vm.prank(auditor);
+        mlog.flagRecord(logId, "Doc hash does not match work card");
+        assertTrue(mlog.flagged(logId));
+
+        vm.prank(auditor);
+        vm.expectRevert(MaintenanceLog.AlreadyFlagged.selector);
+        mlog.flagRecord(logId, "again");
+    }
+
+    function testGet_RevertsForUnknownLog() public {
+        vm.expectRevert(MaintenanceLog.LogNotFound.selector);
+        mlog.get(0);
+    }
+
+    // ---------------------------------------------------------------- Fuzz
+
+    function testFuzz_OutsiderCannotWrite(address who) public {
+        vm.assume(who != admin && who != mro && who != engineer);
+        _install();
+
+        vm.startPrank(who);
+        vm.expectRevert(AircraftRegistry.NotAuthorized.selector);
+        aircraft.registerAircraft("5Y-FZZ", "B737", "Op");
+        vm.expectRevert(PartRegistry.NotAuthorized.selector);
+        parts.registerPart("PN", "SN", "OEM");
+        vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
+        mlog.logMaintenance(aId, engine, "x", "y");
+        vm.stopPrank();
+    }
+
+    function testFuzz_PartIdsAreDistinctAcrossFields(string memory a, string memory b) public view {
+        vm.assume(keccak256(bytes(a)) != keccak256(bytes(b)));
+        assertTrue(parts.partKey(a, "PN", "SN") != parts.partKey(b, "PN", "SN"));
+        assertTrue(parts.partKey("OEM", a, "SN") != parts.partKey("OEM", b, "SN"));
+        // Moving characters between fields must not collide (abi.encode, not encodePacked).
+        assertTrue(parts.partKey("AB", "C", "SN") != parts.partKey("A", "BC", "SN"));
     }
 }

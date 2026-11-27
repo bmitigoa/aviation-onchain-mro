@@ -44,6 +44,23 @@ contract CryptographyTest is Test {
     // SHA-256 literal: a sha256() call is a precompile call and would consume vm.prank.
     bytes32 constant DOC = 0xf23ceea3300d23218052e2da152617c5f75ff5227c4d1b4c61c18e2b3de79aa9; // sha256("Borescope report 5Y-ABC ESN-0001")
 
+    function _part(string memory pn, string memory sn, string memory mfr)
+        internal
+        pure
+        returns (PartRegistry.PartInput memory)
+    {
+        return PartRegistry.PartInput({
+            partNumber: pn,
+            serialNumber: sn,
+            manufacturer: mfr,
+            releaseCertHash: keccak256(abi.encode("Form 1", sn)), // stand-in certificate hash
+            hourLimit: 0,
+            cycleLimit: 0,
+            hoursSinceNew: 0,
+            cyclesSinceNew: 0
+        });
+    }
+
     function setUp() public {
         (engineer, engineerKey) = makeAddrAndKey("engineer");
         (outsider, outsiderKey) = makeAddrAndKey("outsider");
@@ -61,14 +78,19 @@ contract CryptographyTest is Test {
 
         vm.startPrank(mro);
         aId = aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
-        engine = parts.registerPart("CFM56-7B", "SN-ENG-0001", "CFM International");
+        engine = parts.registerPart(_part("CFM56-7B", "SN-ENG-0001", "CFM International"));
         parts.installPart(aId, engine);
         vm.stopPrank();
     }
 
     function _rec() internal view returns (MaintenanceLog.Record memory) {
         return MaintenanceLog.Record({
-            aircraftId: aId, partId: engine, action: "HPT borescope inspection", docHash: DOC, docUri: "ipfs://QmReport"
+            aircraftId: aId,
+            partId: engine,
+            action: "HPT borescope inspection",
+            docHash: DOC,
+            docUri: "ipfs://QmReport",
+            requiresInspection: false
         });
     }
 
@@ -104,6 +126,7 @@ contract CryptographyTest is Test {
                 keccak256(bytes(r.action)),
                 r.docHash,
                 keccak256(bytes(r.docUri)),
+                r.requiresInspection,
                 uint256(0),
                 uint256(1000)
             )

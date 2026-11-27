@@ -1,0 +1,16 @@
+{
+  "name": "aviation-mro-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Off-chain helpers: document hashing, Merkle batch building, EIP-712 record signing",
+  "scripts": {
+    "hash-doc": "node hash-doc.mjs",
+    "build-batch": "node build-batch.mjs",
+    "sign-record": "node sign-record.mjs"
+  },
+  "dependencies": {
+    "@openzeppelin/merkle-tree": "^1.0.8",
+    "viem": "^2.58.8"
+  }
+}

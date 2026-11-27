@@ -36,3 +36,14 @@ jobs:
 
       - name: Run Forge tests
         run: forge test -vvv
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check off-chain Merkle tool matches committed example
+        working-directory: tools
+        run: |
+          npm ci
+          node build-batch.mjs examples/c-check-package.json /tmp/tree.json
+          diff <(jq -S . /tmp/tree.json) <(jq -S . examples/c-check-package.tree.json)

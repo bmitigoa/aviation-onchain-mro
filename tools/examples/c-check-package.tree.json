@@ -1,0 +1,53 @@
+{
+  "root": "0x31d1635c6e9657c787cff4574da33c0b7964c717be6a929b502e40f3bd486d46",
+  "leafCount": 5,
+  "items": [
+    {
+      "partId": "0x832bfa724f42e657a3e61f696ca4232bc3ac9fa6ac69cff4a79880bba840d918",
+      "taskRef": "C-CHK-5YABC-T001 HPT borescope",
+      "docHash": "0x45c38580d2b20a7e422ed8852f2c9b0e8b59a31b45ee88d0b2aa302a313f4750",
+      "proof": [
+        "0x3f9355bf702ce4c077d3829cb8d0c911a3d62ebf317b84b5c31349d02d19814d",
+        "0xeefc7e9eac6694b53cab9386d3b2e7d769e90c00a88f141f640f2bea79c102e8"
+      ]
+    },
+    {
+      "partId": "0x832bfa724f42e657a3e61f696ca4232bc3ac9fa6ac69cff4a79880bba840d918",
+      "taskRef": "C-CHK-5YABC-T002 Fuel nozzle inspection",
+      "docHash": "0x677a50bb914a1b8b1ba60651dcbf3fce7f77bbd808d07b5cb5d3941248f09635",
+      "proof": [
+        "0xa928d8ed9504e76e730f71c4af7358d7fb560982120c02957590ec0309f8aee9",
+        "0xeefc7e9eac6694b53cab9386d3b2e7d769e90c00a88f141f640f2bea79c102e8"
+      ]
+    },
+    {
+      "partId": "0xee30f273afea4dfd2e404f383065f9063214ea4da26098fbd45c6511d3e4d561",
+      "taskRef": "C-CHK-5YABC-T003 APU oil change",
+      "docHash": "0x93fbd57a9fb65178488838ab50896f05b66751950ef5179e803db6c7da2202a6",
+      "proof": [
+        "0x3ad084a1c36ac3eb3b4f96c397b216fe5405d72fb6e3a5cd02bc864078230ad2",
+        "0xe5a06924d6158d5b5998fc9a811938b855af7620673d153d228198b568d9e179"
+      ]
+    },
+    {
+      "partId": "0xee30f273afea4dfd2e404f383065f9063214ea4da26098fbd45c6511d3e4d561",
+      "taskRef": "C-CHK-5YABC-T004 APU starter check",
+      "docHash": "0x9eae5089a99d05efaa0321b9f21ee668c045bfb7b36b19a83383e259ac1e6f3e",
+      "proof": [
+        "0x2c030a2d8d2acfc631535de021be123d18171cc30d9684e97d6ddf299a14a70a",
+        "0xbc8495c929d0da9abbdec654d1568a2b9a7a8f9af0e273a6063a6ef4d3d3de2a",
+        "0xe5a06924d6158d5b5998fc9a811938b855af7620673d153d228198b568d9e179"
+      ]
+    },
+    {
+      "partId": "0x832bfa724f42e657a3e61f696ca4232bc3ac9fa6ac69cff4a79880bba840d918",
+      "taskRef": "C-CHK-5YABC-T005 Engine mount torque",
+      "docHash": "0xfa725c06ae4692a44ffc519fc78ff853536d5b3106782b5857374736f75fcaa8",
+      "proof": [
+        "0x08b18222e0447ac08e12a7b811a8e326b38544ce16181818787a00e9843e067e",
+        "0xbc8495c929d0da9abbdec654d1568a2b9a7a8f9af0e273a6063a6ef4d3d3de2a",
+        "0xe5a06924d6158d5b5998fc9a811938b855af7620673d153d228198b568d9e179"
+      ]
+    }
+  ]
+}

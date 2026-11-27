@@ -35,10 +35,10 @@ All critical actions are enforced through **role-based access control** and reco
 
 * **Role-Based Access Control**
 
-  * Admin
-  * MRO (Maintenance Organization)
-  * Licensed Engineer
-  * Auditor (read-only)
+  * Admin – manages roles; the last admin can never be revoked (no lock-out)
+  * MRO (Maintenance Organization) – registers aircraft and parts, installs/removes/scraps parts
+  * Licensed Engineer – logs and amends maintenance records
+  * Auditor – flags records for review (flags are permanent and public)
 
 * **Aircraft Registry**
 
@@ -47,19 +47,40 @@ All critical actions are enforced through **role-based access control** and reco
 
 * **Parts Registry**
 
-  * Register serialized aircraft parts
-  * Track lifecycle: Registered → Installed → Removed / Scrapped
+  * Parts are identified by `partId = keccak256(abi.encode(manufacturer, partNumber, serialNumber))`, since serial numbers are only unique per manufacturer and part number
+  * Enforced lifecycle (see rules below)
   * Enforce aircraft–part relationships
 
-* **Maintenance Log**
+* **Maintenance Log (append-only)**
 
-  * Log maintenance actions against aircraft and parts
+  * Log maintenance against a part **installed on that aircraft**, or off-wing shop work (`aircraftId = 0`) on a removed / newly registered part
   * Attach document hashes (e.g. IPFS CID or PDF hash)
+  * Corrections are **amendments**: new entries that reference the original, which stays unchanged
   * Immutable event trail for audits
 
-* **Fully Tested**
+* **Tested**
 
-  * Unit tests cover authorization, lifecycle rules, and failure cases
+  * 40 unit and fuzz tests covering authorization, lifecycle rules, events and failure cases
+  * Invariant tests that drive random install / remove / scrap sequences
+
+---
+
+## 🔁 Part Lifecycle Rules
+
+```
+REGISTERED ──install──▶ INSTALLED ──remove──▶ REMOVED ──scrap──▶ SCRAPPED (terminal)
+                            ▲                    │
+                            └──────install───────┘
+REGISTERED ──scrap──▶ SCRAPPED
+```
+
+| Rule | Enforced by |
+| --- | --- |
+| A scrapped part can never be reinstalled | `PartIsScrapped` |
+| An installed part must be removed before scrapping (so the aircraft history shows the removal) | `MustRemoveBeforeScrap` |
+| A part is on at most one aircraft at a time | `AlreadyInstalled` |
+| Maintenance on an aircraft must reference a part installed on it | `PartNotOnAircraft` |
+| Shop work cannot target an installed or scrapped part | `PartNotAvailableForShopWork` |
 
 ---
 
@@ -92,10 +113,18 @@ All critical actions are enforced through **role-based access control** and reco
 
 ```
 aviation-onchain-mro/
-├── src/        # Smart contracts
-├── test/       # Foundry unit tests
-├── script/     # Demo / deployment scripts
+├── src/
+│   ├── RoleManager.sol
+│   ├── AircraftRegistry.sol
+│   ├── PartRegistry.sol
+│   └── MaintenanceLog.sol
+├── test/
+│   ├── AviationMRO.t.sol              # unit + fuzz tests
+│   └── PartLifecycle.invariant.t.sol  # invariant tests
+├── script/
+│   └── Deploy.s.sol                   # DeployScript + DemoScript
 ├── foundry.toml
+└── LICENSE
 ```
 
 ---
@@ -119,18 +148,32 @@ forge build
 forge test -v
 ```
 
-All tests should pass.
+All tests should pass. CI (GitHub Actions) runs `forge fmt --check`, `forge build` and `forge test` on every push, with more fuzz and invariant runs under the `ci` profile.
+
+### Deploy
+
+```bash
+forge script script/Deploy.s.sol:DeployScript --rpc-url <RPC_URL> --private-key <KEY> --broadcast
+```
+
+The deploying account becomes the initial admin.
 
 ---
 
 ## 🧪 Demo Scenario
 
-The demo script shows a realistic workflow:
+Run the full workflow on a local Anvil node:
 
-1. Admin assigns MRO and Engineer roles
-2. Aircraft is registered
-3. A serialized engine part is registered and installed
-4. A maintenance event is logged with a document hash
+```bash
+anvil   # in another terminal
+forge script script/Deploy.s.sol:DemoScript --rpc-url http://127.0.0.1:8545 --broadcast
+```
+
+1. Admin deploys the contracts and assigns MRO, Engineer and Auditor roles
+2. MRO registers aircraft `5Y-ABC`
+3. MRO registers and installs a serialized engine
+4. Engineer logs a maintenance event with a document hash, then corrects it with an amendment
+5. Auditor flags the original entry for review
 
 This mirrors real-world MRO operations.
 

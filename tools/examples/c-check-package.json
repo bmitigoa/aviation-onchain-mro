@@ -1,0 +1,7 @@
+[
+  { "partId": "0x832bfa724f42e657a3e61f696ca4232bc3ac9fa6ac69cff4a79880bba840d918", "taskRef": "C-CHK-5YABC-T001 HPT borescope", "docHash": "0x45c38580d2b20a7e422ed8852f2c9b0e8b59a31b45ee88d0b2aa302a313f4750" },
+  { "partId": "0x832bfa724f42e657a3e61f696ca4232bc3ac9fa6ac69cff4a79880bba840d918", "taskRef": "C-CHK-5YABC-T002 Fuel nozzle inspection", "docHash": "0x677a50bb914a1b8b1ba60651dcbf3fce7f77bbd808d07b5cb5d3941248f09635" },
+  { "partId": "0xee30f273afea4dfd2e404f383065f9063214ea4da26098fbd45c6511d3e4d561", "taskRef": "C-CHK-5YABC-T003 APU oil change", "docHash": "0x93fbd57a9fb65178488838ab50896f05b66751950ef5179e803db6c7da2202a6" },
+  { "partId": "0xee30f273afea4dfd2e404f383065f9063214ea4da26098fbd45c6511d3e4d561", "taskRef": "C-CHK-5YABC-T004 APU starter check", "docHash": "0x9eae5089a99d05efaa0321b9f21ee668c045bfb7b36b19a83383e259ac1e6f3e" },
+  { "partId": "0x832bfa724f42e657a3e61f696ca4232bc3ac9fa6ac69cff4a79880bba840d918", "taskRef": "C-CHK-5YABC-T005 Engine mount torque", "docHash": "0xfa725c06ae4692a44ffc519fc78ff853536d5b3106782b5857374736f75fcaa8" }
+]

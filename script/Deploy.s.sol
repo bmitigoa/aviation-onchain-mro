@@ -39,7 +39,7 @@ contract DeployScript is Script {
 }
 
 /// @notice End-to-end demo against a local Anvil node, using Anvil's default accounts:
-///         #0 admin, #1 MRO (also the relayer), #2 engineer, #3 auditor.
+///         #0 admin, #1 MRO (also the relayer), #2 engineer, #3 auditor, #4 inspector.
 /// anvil   (in another terminal)
 /// forge script script/Deploy.s.sol:DemoScript --rpc-url http://127.0.0.1:8545 --broadcast
 contract DemoScript is Script {
@@ -48,6 +48,7 @@ contract DemoScript is Script {
     uint256 constant MRO_PK = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
     uint256 constant ENGINEER_PK = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
     uint256 constant AUDITOR_PK = 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
+    uint256 constant INSPECTOR_PK = 0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a;
 
     // Root of tools/examples/c-check-package.json, built with tools/build-batch.mjs
     bytes32 constant C_CHECK_ROOT = 0x31d1635c6e9657c787cff4574da33c0b7964c717be6a929b502e40f3bd486d46;
@@ -66,7 +67,34 @@ contract DemoScript is Script {
         // 2-3. MRO registers the aircraft and installs a serialized engine
         vm.startBroadcast(MRO_PK);
         uint256 aId = d.aircraft.registerAircraft("5Y-ABC", "B737-800", "Demo Airline");
-        bytes32 engine = d.parts.registerPart("CFM56-7B", "SN-ENG-0001", "CFM International");
+        bytes32 engine = d.parts
+            .registerPart(
+                PartRegistry.PartInput({
+                    partNumber: "CFM56-7B",
+                    serialNumber: "SN-ENG-0001",
+                    manufacturer: "CFM International",
+                    releaseCertHash: sha256("EASA Form 1 - SN-ENG-0001"),
+                    hourLimit: 0,
+                    cycleLimit: 0,
+                    hoursSinceNew: 0,
+                    cyclesSinceNew: 0
+                })
+            );
+        // A life-limited HPT disk: 20,000 cycles, 1,250 already used
+        bytes32 disk = d.parts
+            .registerPart(
+                PartRegistry.PartInput({
+                    partNumber: "HPT-DISK-1",
+                    serialNumber: "SN-DSK-0042",
+                    manufacturer: "CFM International",
+                    releaseCertHash: sha256("EASA Form 1 - SN-DSK-0042"),
+                    hourLimit: 0,
+                    cycleLimit: 20000,
+                    hoursSinceNew: 3100,
+                    cyclesSinceNew: 1250
+                })
+            );
+        d.parts.installPart(aId, disk);
         d.parts.installPart(aId, engine);
         vm.stopBroadcast();
 
@@ -81,7 +109,20 @@ contract DemoScript is Script {
             );
         vm.stopBroadcast();
 
-        // 7. Auditor flags the original entry for review
+        // 7. Independent inspector signs off the Required Inspection Item
+        vm.startBroadcast(INSPECTOR_PK);
+        d.mlog.signInspection(logId);
+        vm.stopBroadcast();
+
+        // 8. MRO records a day of flying (6 h, 4 cycles) on the installed parts
+        bytes32[] memory installed = new bytes32[](2);
+        installed[0] = engine;
+        installed[1] = disk;
+        vm.startBroadcast(MRO_PK);
+        d.parts.recordUsage(installed, 6, 4);
+        vm.stopBroadcast();
+
+        // 9. Auditor flags the original entry for review
         vm.startBroadcast(AUDITOR_PK);
         d.mlog.flagRecord(logId, "Superseded by amendment; verify work card");
         vm.stopBroadcast();
@@ -90,6 +131,9 @@ contract DemoScript is Script {
         console.log("BatchAnchor      ", address(d.anchor));
         console.log("Log entries      ", d.mlog.count());
         console.log("Doc rev A valid  ", d.mlog.verifyDocument(logId, sha256("Work card WC-0001 rev A")));
+        console.log("RII released     ", d.mlog.isReleased(logId));
+        (, uint32 cyclesLeft) = d.parts.remainingLife(disk);
+        console.log("Disk cycles left ", cyclesLeft);
     }
 
     /// 1. Admin deploys and assigns roles
@@ -103,6 +147,7 @@ contract DemoScript is Script {
         d.roles.grantRole(d.roles.MRO_ROLE(), vm.addr(MRO_PK));
         d.roles.grantRole(d.roles.ENGINEER_ROLE(), vm.addr(ENGINEER_PK));
         d.roles.grantRole(d.roles.AUDITOR_ROLE(), vm.addr(AUDITOR_PK));
+        d.roles.grantRole(d.roles.INSPECTOR_ROLE(), vm.addr(INSPECTOR_PK));
         vm.stopBroadcast();
     }
 
@@ -115,7 +160,8 @@ contract DemoScript is Script {
             partId: engine,
             action: "Borescope inspection",
             docHash: sha256("Work card WC-0001 rev A"),
-            docUri: "ipfs://QmExampleWorkCard"
+            docUri: "ipfs://QmExampleWorkCard",
+            requiresInspection: true // RII: needs an independent inspector
         });
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 digest = d.mlog.recordDigest(r, d.mlog.nonces(engineer), deadline);

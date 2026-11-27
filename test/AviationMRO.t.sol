@@ -22,6 +22,23 @@ contract AviationMROTest is Test {
     uint256 aId;
     bytes32 engine;
 
+    function _part(string memory pn, string memory sn, string memory mfr)
+        internal
+        pure
+        returns (PartRegistry.PartInput memory)
+    {
+        return PartRegistry.PartInput({
+            partNumber: pn,
+            serialNumber: sn,
+            manufacturer: mfr,
+            releaseCertHash: keccak256(abi.encode("Form 1", sn)), // stand-in certificate hash
+            hourLimit: 0,
+            cycleLimit: 0,
+            hoursSinceNew: 0,
+            cyclesSinceNew: 0
+        });
+    }
+
     function setUp() public {
         vm.startPrank(admin);
         roles = new RoleManager(admin);
@@ -36,7 +53,7 @@ contract AviationMROTest is Test {
 
         vm.startPrank(mro);
         aId = aircraft.registerAircraft("5Y-ABC", "B737-800", "Kenya Airways");
-        engine = parts.registerPart("CFM56-7B", "SN-ENG-0001", "CFM International");
+        engine = parts.registerPart(_part("CFM56-7B", "SN-ENG-0001", "CFM International"));
         vm.stopPrank();
     }
 
@@ -133,7 +150,7 @@ contract AviationMROTest is Test {
 
     function testRegisterPart_SameSerialDifferentManufacturerIsAllowed() public {
         vm.prank(mro);
-        bytes32 other = parts.registerPart("CFM56-7B", "SN-ENG-0001", "Another OEM");
+        bytes32 other = parts.registerPart(_part("CFM56-7B", "SN-ENG-0001", "Another OEM"));
         assertTrue(other != engine);
         assertTrue(parts.partExists(other));
     }
@@ -141,13 +158,13 @@ contract AviationMROTest is Test {
     function testRegisterPart_RevertsOnDuplicate() public {
         vm.prank(mro);
         vm.expectRevert(PartRegistry.PartExists.selector);
-        parts.registerPart("CFM56-7B", "SN-ENG-0001", "CFM International");
+        parts.registerPart(_part("CFM56-7B", "SN-ENG-0001", "CFM International"));
     }
 
     function testRegisterPart_RevertsForEngineer() public {
         vm.prank(engineer);
         vm.expectRevert(PartRegistry.NotAuthorized.selector);
-        parts.registerPart("PN-1", "SN-1", "OEM");
+        parts.registerPart(_part("PN-1", "SN-1", "OEM"));
     }
 
     function testPartKey_MatchesReturnedId() public view {
@@ -251,7 +268,12 @@ contract AviationMROTest is Test {
         returns (MaintenanceLog.Record memory)
     {
         return MaintenanceLog.Record({
-            aircraftId: aircraftId, partId: partId, action: action, docHash: DOC, docUri: "ipfs://QmWorkCard"
+            aircraftId: aircraftId,
+            partId: partId,
+            action: action,
+            docHash: DOC,
+            docUri: "ipfs://QmWorkCard",
+            requiresInspection: false
         });
     }
 
@@ -407,7 +429,7 @@ contract AviationMROTest is Test {
         vm.expectRevert(AircraftRegistry.NotAuthorized.selector);
         aircraft.registerAircraft("5Y-FZZ", "B737", "Op");
         vm.expectRevert(PartRegistry.NotAuthorized.selector);
-        parts.registerPart("PN", "SN", "OEM");
+        parts.registerPart(_part("PN", "SN", "OEM"));
         vm.expectRevert(MaintenanceLog.NotAuthorized.selector);
         mlog.logMaintenance(_rec(aId, engine, "x"));
         vm.stopPrank();

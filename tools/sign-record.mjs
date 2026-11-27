@@ -4,7 +4,8 @@
 //   ENGINEER_KEY=0x.. RPC_URL=http://127.0.0.1:8545 MAINTENANCE_LOG=0x.. \
 //   node sign-record.mjs <record.json> [--relay]
 //
-// record.json: { "aircraftId": 1, "partId": "0x..", "action": "...", "docHash": "0x..", "docUri": "ipfs://..." }
+// record.json: { "aircraftId": 1, "partId": "0x..", "action": "...", "docHash": "0x..", "docUri": "ipfs://...",
+//                "requiresInspection": false }
 // Optional env: DEADLINE_SECONDS (default 3600).
 // With --relay, RELAYER_KEY submits the signed record via logMaintenanceBySig.
 import { readFileSync } from "node:fs";
@@ -20,7 +21,7 @@ if (!file || !ENGINEER_KEY || !RPC_URL || !MAINTENANCE_LOG) {
 
 const abi = parseAbi([
   "function nonces(address owner) view returns (uint256)",
-  "function logMaintenanceBySig((uint256 aircraftId, bytes32 partId, string action, bytes32 docHash, string docUri) r, address engineer, uint256 deadline, bytes signature) returns (uint256)",
+  "function logMaintenanceBySig((uint256 aircraftId, bytes32 partId, string action, bytes32 docHash, string docUri, bool requiresInspection) r, address engineer, uint256 deadline, bytes signature) returns (uint256)",
 ]);
 
 const raw = JSON.parse(readFileSync(file, "utf8"));
@@ -30,6 +31,7 @@ const record = {
   action: raw.action,
   docHash: raw.docHash,
   docUri: raw.docUri ?? "",
+  requiresInspection: Boolean(raw.requiresInspection),
 };
 
 const transport = http(RPC_URL);
@@ -50,6 +52,7 @@ const signature = await engineer.signTypedData({
       { name: "action", type: "string" },
       { name: "docHash", type: "bytes32" },
       { name: "docUri", type: "string" },
+      { name: "requiresInspection", type: "bool" },
       { name: "nonce", type: "uint256" },
       { name: "deadline", type: "uint256" },
     ],

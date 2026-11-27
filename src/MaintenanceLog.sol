@@ -17,6 +17,9 @@ import "./PartRegistry.sol";
 ///      - Engineers can sign records off-chain with EIP-712; anyone (e.g. the MRO's relayer)
 ///        can submit them, so engineers never need gas. ERC-1271 smart-contract wallets
 ///        are supported via SignatureChecker. Nonces and deadlines prevent replay.
+///      - Required Inspection Items (RII): a record marked requiresInspection is not released
+///        until a second, independent person with INSPECTOR_ROLE signs it off. The engineer who
+///        did the work can never inspect it.
 contract MaintenanceLog is EIP712, Nonces {
     error NotAuthorized();
     error EmptyString();
@@ -29,6 +32,9 @@ contract MaintenanceLog is EIP712, Nonces {
     error AlreadyFlagged();
     error SignatureExpired();
     error InvalidSignature();
+    error InspectionNotRequired();
+    error AlreadyInspected();
+    error CannotInspectOwnWork();
 
     /// @dev aircraftId == 0 means off-wing (shop) work on a removed or newly registered part.
     struct MaintenanceEvent {
@@ -42,6 +48,9 @@ contract MaintenanceLog is EIP712, Nonces {
         uint64 timestamp;
         bool isAmendment;
         uint256 amendsLogId; // only meaningful when isAmendment == true
+        bool requiresInspection; // Required Inspection Item
+        address inspector; // independent inspector, once signed off
+        uint64 inspectedAt;
     }
 
     /// @dev Input bundle for a new record (keeps the stack shallow).
@@ -51,10 +60,11 @@ contract MaintenanceLog is EIP712, Nonces {
         string action;
         bytes32 docHash;
         string docUri;
+        bool requiresInspection;
     }
 
     bytes32 public constant MAINTENANCE_RECORD_TYPEHASH = keccak256(
-        "MaintenanceRecord(uint256 aircraftId,bytes32 partId,string action,bytes32 docHash,string docUri,uint256 nonce,uint256 deadline)"
+        "MaintenanceRecord(uint256 aircraftId,bytes32 partId,string action,bytes32 docHash,string docUri,bool requiresInspection,uint256 nonce,uint256 deadline)"
     );
 
     RoleManager public immutable roles;
@@ -77,6 +87,7 @@ contract MaintenanceLog is EIP712, Nonces {
     );
     event MaintenanceAmended(uint256 indexed logId, uint256 indexed amendsLogId, address indexed engineer);
     event RecordFlagged(uint256 indexed logId, address indexed auditor, string reason);
+    event InspectionSignedOff(uint256 indexed logId, address indexed inspector, address indexed engineer);
 
     constructor(RoleManager roleManager, AircraftRegistry aircraftRegistry, PartRegistry partRegistry)
         EIP712("AviationMRO MaintenanceLog", "1")
@@ -130,12 +141,34 @@ contract MaintenanceLog is EIP712, Nonces {
         if (docHash == bytes32(0)) revert EmptyDocHash();
 
         MaintenanceEvent storage o = logs[originalLogId];
-        Record memory r =
-            Record({aircraftId: o.aircraftId, partId: o.partId, action: action, docHash: docHash, docUri: docUri});
+        // An amendment to an RII record needs its own independent inspection.
+        Record memory r = Record({
+            aircraftId: o.aircraftId,
+            partId: o.partId,
+            action: action,
+            docHash: docHash,
+            docUri: docUri,
+            requiresInspection: o.requiresInspection
+        });
         logId = _append(r, msg.sender, true, originalLogId);
         _amendments[originalLogId].push(logId);
 
         emit MaintenanceAmended(logId, originalLogId, msg.sender);
+    }
+
+    /// @notice Independent inspector signs off a Required Inspection Item.
+    function signInspection(uint256 logId) external {
+        if (!roles.hasRole(roles.INSPECTOR_ROLE(), msg.sender)) revert NotAuthorized();
+        if (logId >= logs.length) revert LogNotFound();
+
+        MaintenanceEvent storage e = logs[logId];
+        if (!e.requiresInspection) revert InspectionNotRequired();
+        if (e.inspector != address(0)) revert AlreadyInspected();
+        if (e.engineer == msg.sender) revert CannotInspectOwnWork();
+
+        e.inspector = msg.sender;
+        e.inspectedAt = uint64(block.timestamp);
+        emit InspectionSignedOff(logId, msg.sender, e.engineer);
     }
 
     /// @notice Auditors flag a record for review. Flags are permanent and public.
@@ -149,6 +182,13 @@ contract MaintenanceLog is EIP712, Nonces {
     }
 
     // ------------------------------------------------------------------ read
+
+    /// @notice True when the work is complete for release: no inspection required, or independently inspected.
+    function isReleased(uint256 logId) external view returns (bool) {
+        if (logId >= logs.length) revert LogNotFound();
+        MaintenanceEvent storage e = logs[logId];
+        return !e.requiresInspection || e.inspector != address(0);
+    }
 
     /// @notice True if `docHash` (SHA-256 of a file) is the document recorded for `logId`.
     function verifyDocument(uint256 logId, bytes32 docHash) external view returns (bool) {
@@ -167,6 +207,7 @@ contract MaintenanceLog is EIP712, Nonces {
                     keccak256(bytes(r.action)),
                     r.docHash,
                     keccak256(bytes(r.docUri)),
+                    r.requiresInspection,
                     nonce,
                     deadline
                 )
@@ -234,7 +275,10 @@ contract MaintenanceLog is EIP712, Nonces {
                 submitter: msg.sender,
                 timestamp: uint64(block.timestamp),
                 isAmendment: isAmendment,
-                amendsLogId: amendsLogId
+                amendsLogId: amendsLogId,
+                requiresInspection: r.requiresInspection,
+                inspector: address(0),
+                inspectedAt: 0
             })
         );
         logId = logs.length - 1;
